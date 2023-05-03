@@ -273,15 +273,17 @@ func (o *Options) Run(cmd *cobra.Command, streams genericclioptions.IOStreams) e
 
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
-	lock := &resourcelock.ConfigMapLock{
-		ConfigMapMeta: metav1.ObjectMeta{
-			Name:      "acme-controller-locks",
-			Namespace: o.ControllerNamespace,
-		},
-		Client: o.kubeClient.CoreV1(),
-		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: id,
-		},
+	lock, err := resourcelock.New(resourcelock.ConfigMapsLeasesResourceLock, o.ControllerNamespace, "acme-controller-locks", o.kubeClient.CoreV1(), o.kubeClient.CoordinationV1(), resourcelock.ResourceLockConfig{
+		Identity: id,
+	})
+
+	// New returns a multilock with secondary lock using leases (unsupported in OCP 3.x)
+	mLock := lock.(*resourcelock.MultiLock)
+	// Throw away the secondary lock
+	lock = mLock.Primary
+
+	if err != nil {
+		return err
 	}
 
 	leChan := make(chan struct{})

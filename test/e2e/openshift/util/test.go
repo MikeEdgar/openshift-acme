@@ -1,12 +1,14 @@
 package util
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base32"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/reporters"
@@ -77,11 +79,16 @@ func InitTest() {
 				},
 			}, nil
 		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
 		TestContext.DeleteTestingNS = func(f *framework.Framework, ns *corev1.Namespace) error {
 			var gracePeriod int64 = 0
 			var propagation = metav1.DeletePropagationForeground
 			err := f.RouteClientset().RouteV1().Routes(ns.Name).DeleteCollection(
-				&metav1.DeleteOptions{
+				ctx,
+				metav1.DeleteOptions{
 					GracePeriodSeconds: &gracePeriod,
 					PropagationPolicy:  &propagation,
 				}, metav1.ListOptions{

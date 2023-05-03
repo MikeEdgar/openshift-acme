@@ -368,7 +368,7 @@ func (ac *AccountController) sync(ctx context.Context, key string) error {
 				corev1.TLSPrivateKeyKey: keyPem,
 			},
 		}
-		secret, err = ac.kubeClient.CoreV1().Secrets(cmReadOnly.Namespace).Create(secret)
+		secret, err = ac.kubeClient.CoreV1().Secrets(cmReadOnly.Namespace).Create(ctx, secret, metav1.CreateOptions{})
 		if err != nil {
 			return err
 		}
@@ -430,7 +430,7 @@ func (ac *AccountController) sync(ctx context.Context, key string) error {
 		return nil
 	}
 
-	_, err = ac.kubeClient.CoreV1().ConfigMaps(cmReadOnly.Namespace).Update(cm)
+	_, err = ac.kubeClient.CoreV1().ConfigMaps(cmReadOnly.Namespace).Update(ctx, cm, metav1.UpdateOptions{})
 	if err != nil {
 		return err
 	}

@@ -9,7 +9,7 @@ import (
 	g "github.com/onsi/ginkgo"
 	o "github.com/onsi/gomega"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,6 +21,10 @@ import (
 	"k8s.io/client-go/util/retry"
 
 	projectapiv1 "github.com/openshift/api/project/v1"
+)
+
+const (
+	SyncTimeout = 30 * time.Second
 )
 
 func CreateTestingNamespace(f *Framework, name string, labels map[string]string) (*v1.Namespace, error) {
@@ -35,11 +39,14 @@ func CreateTestingNamespace(f *Framework, name string, labels map[string]string)
 		},
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	// Be robust about making the namespace creation call.
 	var got *v1.Namespace
 	if err := wait.PollImmediate(2*time.Second, 30*time.Second, func() (bool, error) {
 		var err error
-		got, err = f.KubeClientSet().CoreV1().Namespaces().Create(namespaceObj)
+		got, err = f.KubeClientSet().CoreV1().Namespaces().Create(ctx, namespaceObj, metav1.CreateOptions{})
 		if err != nil {
 			Logf("Unexpected error while creating namespace: %v", err)
 			return false, nil
@@ -49,11 +56,10 @@ func CreateTestingNamespace(f *Framework, name string, labels map[string]string)
 		return nil, err
 	}
 
-	w, err := f.KubeClientSet().CoreV1().ServiceAccounts(got.Name).Watch(metav1.SingleObject(metav1.ObjectMeta{Name: "default"}))
+	w, err := f.KubeClientSet().CoreV1().ServiceAccounts(got.Name).Watch(ctx, metav1.SingleObject(metav1.ObjectMeta{Name: "default"}))
 	if err != nil {
 		return got, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	_, err = watchtools.UntilWithoutRetry(ctx, w, func(event watch.Event) (bool, error) {
 		switch t := event.Object.(type) {
@@ -68,18 +74,20 @@ func CreateTestingNamespace(f *Framework, name string, labels map[string]string)
 
 func CreateProject(f *Framework, name string, labels map[string]string) (*v1.Namespace, error) {
 	Logf("************** %#v", labels)
-	_, err := f.ProjectClientset().ProjectV1().ProjectRequests().Create(&projectapiv1.ProjectRequest{
+	ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
+
+	_, err := f.ProjectClientset().ProjectV1().ProjectRequests().Create(ctx, &projectapiv1.ProjectRequest{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
 			Labels: labels,
 		},
-	})
+	}, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
 	}
 
 	err = wait.ExponentialBackoff(retry.DefaultBackoff, func() (bool, error) {
-		_, err := f.KubeClientSet().CoreV1().Pods(name).List(metav1.ListOptions{})
+		_, err := f.KubeClientSet().CoreV1().Pods(name).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			if apierrs.IsForbidden(err) {
 				Logf("Waiting for user to have access to the namespace")
@@ -115,7 +123,8 @@ func DeleteNamespace(f *Framework, ns *v1.Namespace) error {
 	g.By(fmt.Sprintf("Destroying namespace %q.", ns.Name))
 	var gracePeriod int64 = 0
 	var propagation = metav1.DeletePropagationForeground
-	err := f.KubeAdminClientSet().CoreV1().Namespaces().Delete(ns.Name, &metav1.DeleteOptions{
+	ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
+	err := f.KubeAdminClientSet().CoreV1().Namespaces().Delete(ctx, ns.Name, metav1.DeleteOptions{
 		GracePeriodSeconds: &gracePeriod,
 		PropagationPolicy:  &propagation,
 	})
@@ -127,7 +136,9 @@ func DeleteNamespace(f *Framework, ns *v1.Namespace) error {
 
 	g.By(fmt.Sprintf("Waiting for namespace %q to be removed.", ns.Name))
 	err = wait.PollImmediate(1*time.Second, 5*time.Minute, func() (bool, error) {
-		_, err := f.KubeAdminClientSet().CoreV1().Namespaces().Get(ns.Name, metav1.GetOptions{})
+		ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
+
+		_, err := f.KubeAdminClientSet().CoreV1().Namespaces().Get(ctx, ns.Name, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				return true, nil
@@ -144,7 +155,8 @@ func DeleteNamespace(f *Framework, ns *v1.Namespace) error {
 }
 
 func DumpEventsInNamespace(c kubernetes.Interface, namespace string) {
-	events, err := c.CoreV1().Events(namespace).List(metav1.ListOptions{})
+	ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
+	events, err := c.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{})
 	o.Expect(err).NotTo(o.HaveOccurred())
 
 	g.By(fmt.Sprintf("Found %d events.", len(events.Items)))
